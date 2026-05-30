@@ -17,11 +17,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+import uuid
+from pydantic import BaseModel, field_validator
+
 class IngestRequest(BaseModel):
     url_a: str
     url_b: str
     session_id: Optional[str] = None
 
+    @field_validator('session_id')
+    @classmethod
+    def validate_session_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "string" or v.strip() == "":
+            return None
+        try:
+            uuid.UUID(v)
+            return v
+        except ValueError:
+            return None
 
 class IngestResponse(BaseModel):
     session_id: str
@@ -76,6 +89,14 @@ async def ingest_videos(req: IngestRequest, request: Request):
         meta['engagement_rate'] = compute_engagement_rate(
             meta.get('likes'), meta.get('comments'), meta.get('views')
         )
+        def _to_int(val):
+            if val is None:
+                return None
+            try:
+                return int(float(val))
+            except (ValueError, TypeError):
+                return None
+
         row = {
             'session_id': session_id,
             'video_label': label,
@@ -83,13 +104,13 @@ async def ingest_videos(req: IngestRequest, request: Request):
             'platform': platform,
             'title': meta.get('title'),
             'creator': meta.get('creator'),
-            'follower_count': meta.get('follower_count'),
-            'views': meta.get('views'),
-            'likes': meta.get('likes'),
-            'comments': meta.get('comments'),
+            'follower_count': _to_int(meta.get('follower_count')),
+            'views': _to_int(meta.get('views')),
+            'likes': _to_int(meta.get('likes')),
+            'comments': _to_int(meta.get('comments')),
             'hashtags': meta.get('hashtags', []),
             'upload_date': meta.get('upload_date'),
-            'duration_seconds': meta.get('duration_seconds'),
+            'duration_seconds': _to_int(meta.get('duration_seconds')),
             'engagement_rate': meta.get('engagement_rate'),
             'transcript_status': 'pending',
             'chunks_count': 0

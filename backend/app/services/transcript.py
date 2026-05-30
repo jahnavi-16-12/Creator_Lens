@@ -113,7 +113,8 @@ def _get_api_transcript_sync(video_id: str) -> Optional[Dict[str, Any]]:
             'method': 'api',
             'language': transcript.language_code
         }
-    except (TranscriptsDisabled, NoTranscriptFound):
+    except Exception as e:
+        logger.warning(f"YouTube Transcript API failed for {video_id}: {e}. Falling back to Whisper.")
         return None  # Trigger fallback
 
 async def get_youtube_transcript(url: str) -> Dict[str, Any]:

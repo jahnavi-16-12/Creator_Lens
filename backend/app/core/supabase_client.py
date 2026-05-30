@@ -1,5 +1,10 @@
-from supabase._async.client import AsyncClient
+from __future__ import annotations
+
+import logging
+from supabase._async.client import AsyncClient, create_client
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 """
 SQL Schema for Supabase (run manually in dashboard SQL editor):
@@ -31,18 +36,32 @@ CREATE TABLE IF NOT EXISTS video_metadata (
 );
 """
 
-# Initialize the async Supabase client synchronously to export as a singleton
-supabase_client: AsyncClient = AsyncClient(
-    settings.SUPABASE_URL,
-    settings.SUPABASE_KEY
-)
+# Lazily initialized async Supabase client singleton
+_supabase_client: AsyncClient | None = None
+
+
+async def get_client() -> AsyncClient:
+    """
+    Returns the async Supabase client, initializing it on first call.
+    Using lazy init avoids key validation errors at module import time
+    and allows the app to start even if env vars are temporarily missing.
+    """
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = await create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_KEY
+        )
+        logger.info("Supabase async client initialized.")
+    return _supabase_client
 
 
 async def create_session() -> str:
     """
     Inserts a new row into video_sessions and returns the generated session_id.
     """
-    response = await supabase_client.table('video_sessions').insert({}).execute()
+    client = await get_client()
+    response = await client.table('video_sessions').insert({}).execute()
     return response.data[0]['session_id']
 
 
@@ -50,7 +69,8 @@ async def save_video_metadata(data: dict) -> dict:
     """
     Upserts video metadata into the video_metadata table and returns the row.
     """
-    response = await supabase_client.table('video_metadata').upsert(data).execute()
+    client = await get_client()
+    response = await client.table('video_metadata').upsert(data).execute()
     return response.data[0]
 
 
@@ -58,7 +78,8 @@ async def get_session_metadata(session_id: str) -> list[dict]:
     """
     Returns both video metadata rows for a specific session.
     """
-    response = await supabase_client.table('video_metadata').select('*').eq('session_id', session_id).execute()
+    client = await get_client()
+    response = await client.table('video_metadata').select('*').eq('session_id', session_id).execute()
     return response.data
 
 
@@ -66,7 +87,8 @@ async def update_transcript_status(session_id: str, label: str, status: str, chu
     """
     Updates the transcript_status and chunks_count for a specific video in a session.
     """
-    await supabase_client.table('video_metadata').update({
+    client = await get_client()
+    await client.table('video_metadata').update({
         'transcript_status': status,
         'chunks_count': chunks
     }).match({

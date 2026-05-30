@@ -34,7 +34,7 @@ async def classify_query(state: RAGState) -> dict:
     Classifies the user query into a type and determines if a complex model is needed.
     """
     # Use cheapest model for classification
-    model = ChatGoogleGenerativeAI(model=settings.LLM_LITE_MODEL, temperature=0)
+    model = ChatGoogleGenerativeAI(model=settings.LLM_LITE_MODEL, temperature=0, google_api_key=settings.GEMINI_API_KEY)
     
     prompt = f"""Classify the query into one type. 
 Types: 'comparison', 'metadata', 'suggestion', 'engagement', 'general'.
@@ -107,11 +107,16 @@ async def generate_response(state: RAGState) -> dict:
     Generates the final response using the appropriate model based on query complexity.
     """
     model_name = settings.LLM_MODEL if state.get('use_complex_model') else settings.LLM_LITE_MODEL
-    model = ChatGoogleGenerativeAI(model=model_name, streaming=True, temperature=0.2)
+    model = ChatGoogleGenerativeAI(model=model_name, streaming=True, temperature=0.2, google_api_key=settings.GEMINI_API_KEY)
     
     system_prompt = """You are a video analytics expert helping creators improve performance.
 Always cite sources as [Video A - Chunk N] or [Video B - Chunk N].
-Base answers only on the provided context and metadata."""
+Base answers only on the provided context and metadata. 
+
+IMPORTANT RULES FOR METADATA:
+- If a metric (like views, followers, or engagement_rate) is `null` or missing, it means the platform (e.g., Instagram) hides this data from public scrapers. 
+- DO NOT assume `null` means zero. 
+- Acknowledge that the data is hidden or unavailable rather than claiming the other video performed better simply because it has visible metrics."""
 
     # Build Context from Metadata and Chunks
     context_str = "Video Metadata:\n"
@@ -135,7 +140,7 @@ Base answers only on the provided context and metadata."""
         messages.extend(state['messages'][:-1])
     messages.append(HumanMessage(content=user_prompt))
     
-    response_msg = await model.ainvoke(messages)
+    response_msg = await model.ainvoke(messages, config={"tags": ["final_answer"]})
     
     # We return the response string and update the message history with the AI message
     return {
@@ -213,7 +218,7 @@ async def stream_rag_response(query: str, session_id: str, thread_id: str) -> As
     }
     
     async for event in app.astream_events(initial_state, config=config, version='v2'):
-        if event['event'] == 'on_chat_model_stream':
+        if event['event'] == 'on_chat_model_stream' and 'final_answer' in event.get('tags', []):
             if 'chunk' in event['data'] and hasattr(event['data']['chunk'], 'content'):
                 content = event['data']['chunk'].content
                 if content:

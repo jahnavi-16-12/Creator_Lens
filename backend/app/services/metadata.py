@@ -7,15 +7,20 @@ import yt_dlp
 logger = logging.getLogger(__name__)
 
 
-def _extract_info_sync(url: str) -> dict:
+def _extract_info_sync(url: str, extra_opts: dict | None = None) -> dict:
     """
     Synchronous helper to extract video info using yt-dlp.
     Should be wrapped in asyncio.to_thread to prevent blocking.
+    extra_opts: merged into base ydl options (platform-specific overrides).
     """
     ydl_opts = {
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'skip_download': True,    # never download; metadata only
+        'ignoreerrors': False,    # let errors bubble so callers can catch them
     }
+    if extra_opts:
+        ydl_opts.update(extra_opts)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -26,7 +31,7 @@ async def get_youtube_metadata(url: str) -> dict:
     Handles missing fields gracefully by returning None where applicable.
     """
     try:
-        info = await asyncio.to_thread(_extract_info_sync, url)
+        info = await asyncio.to_thread(_extract_info_sync, url) or {}
     except Exception as e:
         logger.error(f"Failed to extract metadata for YouTube URL {url}: {e}")
         info = {}
@@ -53,11 +58,18 @@ async def get_instagram_metadata(url: str) -> dict:
     Instagram limits public metadata, so views/likes/comments may be None.
     Handles missing fields gracefully.
     """
+    # Try with Chrome cookies first (works if user is logged into Instagram in Chrome).
+    # Falls back to unauthenticated fetch if cookies aren't available.
+    instagram_opts = {'cookiesfrombrowser': ('chrome',)}
     try:
-        info = await asyncio.to_thread(_extract_info_sync, url)
-    except Exception as e:
-        logger.error(f"Failed to extract metadata for Instagram URL {url}: {e}")
-        info = {}
+        info = await asyncio.to_thread(_extract_info_sync, url, instagram_opts) or {}
+    except Exception:
+        logger.warning(f"Instagram fetch with Chrome cookies failed for {url}, retrying without cookies...")
+        try:
+            info = await asyncio.to_thread(_extract_info_sync, url) or {}
+        except Exception as e:
+            logger.error(f"Failed to extract metadata for Instagram URL {url}: {e}")
+            info = {}
 
     tags = info.get('tags') or []
 

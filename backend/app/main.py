@@ -31,12 +31,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS Middleware
+# Note: allow_credentials=True is incompatible with allow_origins=['*'].
+# Use an explicit origins list so credentialed requests work correctly.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:3000', '*'],
+    allow_origins=['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'],
     allow_credentials=True,
     allow_methods=['*'],
-    allow_headers=['*']
+    allow_headers=['*'],
 )
 
 

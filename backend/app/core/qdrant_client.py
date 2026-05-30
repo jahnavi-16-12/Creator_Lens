@@ -29,7 +29,7 @@ def ensure_collection_exists():
             qdrant.create_collection(
                 collection_name=settings.QDRANT_COLLECTION,
                 vectors_config=models.VectorParams(
-                    size=settings.EMBEDDING_DIMENSIONS,  # Typically 768 for Gemini
+                    size=settings.EMBEDDING_DIMENSIONS,
                     distance=models.Distance.COSINE
                 ),
                 optimizers_config=models.OptimizersConfigDiff(
@@ -37,10 +37,20 @@ def ensure_collection_exists():
                 )
             )
             logger.info(f"Qdrant collection '{settings.QDRANT_COLLECTION}' created.")
-            print(f"Qdrant collection '{settings.QDRANT_COLLECTION}' created.")
         else:
             logger.info(f"Qdrant collection '{settings.QDRANT_COLLECTION}' already exists.")
-            print(f"Qdrant collection '{settings.QDRANT_COLLECTION}' already exists.")
+
+        # Ensure payload indexes exist (idempotent)
+        qdrant.create_payload_index(
+            collection_name=settings.QDRANT_COLLECTION,
+            field_name="session_id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        qdrant.create_payload_index(
+            collection_name=settings.QDRANT_COLLECTION,
+            field_name="video_label",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
             
     except Exception as e:
         logger.error(f"Error checking/creating Qdrant collection: {e}")
