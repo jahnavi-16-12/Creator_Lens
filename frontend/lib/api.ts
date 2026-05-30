@@ -55,11 +55,22 @@ export async function ingestVideos(urlA: string, urlB: string): Promise<IngestRe
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url_a: urlA, url_b: urlB }),
   });
-  
+
   if (!res.ok) {
-    throw new Error(`Ingest failed: ${res.statusText}`);
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.detail ?? `Ingest failed: ${res.statusText}`);
   }
-  return res.json();
+
+  const data = await res.json();
+  // Backend returns {} for failed videos — normalise to null
+  const normalize = (v: unknown): VideoMetadata | null =>
+    v && typeof v === 'object' && Object.keys(v).length > 0 ? (v as VideoMetadata) : null;
+
+  return {
+    ...data,
+    video_a: normalize(data.video_a),
+    video_b: normalize(data.video_b),
+  } as IngestResponse;
 }
 
 // Stream chat with SSE
