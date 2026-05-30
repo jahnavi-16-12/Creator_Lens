@@ -3,7 +3,7 @@ import logging
 import asyncio
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.supabase_client import create_session, save_video_metadata, update_transcript_status
@@ -33,7 +33,7 @@ class IngestResponse(BaseModel):
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest_videos(req: IngestRequest):
+async def ingest_videos(req: IngestRequest, request: Request):
     # 1. Validate Platforms
     if 'youtube.com' not in req.url_a and 'youtu.be' not in req.url_a:
         raise HTTPException(status_code=422, detail="url_a must be a valid YouTube URL")

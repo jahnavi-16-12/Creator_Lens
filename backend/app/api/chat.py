@@ -69,7 +69,7 @@ async def chat_stream(req: ChatRequest, request: Request):
 
 
 @router.get("/chat/history/{thread_id}")
-async def get_chat_history(thread_id: str):
+async def get_chat_history(thread_id: str, request: Request):
     """
     Retrieves message history from the LangGraph MemorySaver for a given thread_id.
     """
