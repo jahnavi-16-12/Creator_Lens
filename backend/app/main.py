@@ -11,7 +11,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.qdrant_client import ensure_collection_exists
-from app.api import ingest, chat
+from app.api import ingest, chat, sessions
 
 # Configure standard logging format
 logging.basicConfig(
@@ -63,6 +63,7 @@ async def log_slow_requests(request: Request, call_next):
 # Include Routers
 app.include_router(ingest.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 
 
 @app.on_event('startup')

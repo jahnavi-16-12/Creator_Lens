@@ -40,6 +40,12 @@ class Settings(BaseSettings):
         description="The service role or anon key for Supabase API requests."
     )
     
+    # Session DB path (local SQLite for quick MVP)
+    SESSION_DB_PATH: str = Field(
+        "./session_data.db",
+        description="Path to local SQLite file for persisting session metadata when Supabase is not used."
+    )
+    
     # Redis Configuration
     REDIS_URL: str = Field(
         "redis://localhost:6379",
