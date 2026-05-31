@@ -1,76 +1,41 @@
-// src: frontend/app/page.tsx
-'use client';
-
-import { useState, useCallback } from 'react';
+import React from 'react';
+import Link from 'next/link';
 import IngestionForm from './components/IngestionForm';
-import VideoCard from './components/VideoCard';
-import ChatPanel from './components/ChatPanel';
-import type { VideoMetadata } from '../lib/api';
-
-interface RootState {
-  sessionId: string;
-  videoA: VideoMetadata | null;
-  videoB: VideoMetadata | null;
-  isReady: boolean;
-}
 
 export default function HomePage() {
-  const [state, setState] = useState<RootState>({
-    sessionId: '',
-    videoA: null,
-    videoB: null,
-    isReady: false,
-  });
-
-  const handleIngestionSuccess = useCallback(
-    (sessionId: string, videoA: VideoMetadata, videoB: VideoMetadata) => {
-      setState({ sessionId, videoA, videoB, isReady: true });
-    },
-    []
-  );
-
-  const reset = useCallback(() => {
-    setState({ sessionId: '', videoA: null, videoB: null, isReady: false });
-  }, []);
-
   return (
-    <div className="bg-gray-950 min-h-screen flex flex-col overflow-hidden">
-      {state.isReady && (
-        <header className="flex items-center justify-between bg-gray-900/80 backdrop-blur-md border-b border-gray-800 px-4 py-2">
-          <span className="text-sm text-gray-300">Session: {state.sessionId}</span>
-          <button
-            onClick={reset}
-            className="px-3 py-1 text-xs font-medium text-gray-200 bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition"
-          >
-            New Session
-          </button>
-        </header>
-      )}
+    <div className="space-y-12">
+      {/* Hero Section */}
+      <section className="text-center py-16 bg-gray-900/60 backdrop-blur-md rounded-lg">
+        <h1 className="text-4xl font-bold text-gray-100 mb-4">Creator Lens AI</h1>
+        <p className="text-lg text-gray-300 max-w-2xl mx-auto mb-6">
+          Compare two social‑media videos side‑by‑side using AI‑powered analysis. Get instant engagement insights, transcript analysis, and creator benchmarking.
+        </p>
+        <Link href="/dashboard" className="px-6 py-3 bg-primary text-white rounded-md hover:bg-primary-dark transition">
+          Go to Dashboard
+        </Link>
+      </section>
 
-      <main className="flex-1 overflow-auto">
-        {!state.isReady ? (
-          <div className="flex h-full items-center justify-center">
-            <IngestionForm onSuccess={handleIngestionSuccess} />
+      {/* Feature Cards */}
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 px-4 max-w-7xl mx-auto">
+        {[
+          { title: 'Transcript Analysis', desc: 'Full‑text extraction with semantic search.', icon: '📝' },
+          { title: 'Engagement Analytics', desc: 'Likes, comments, view‑rate breakdowns.', icon: '📈' },
+          { title: 'Hook Comparison', desc: 'Identify the most effective video hooks.', icon: '🔀' },
+          { title: 'AI Recommendations', desc: 'Data‑driven suggestions to boost performance.', icon: '🤖' },
+        ].map((f) => (
+          <div key={f.title} className="bg-gray-800 rounded-lg p-6 text-center hover:shadow-xl transition">
+            <div className="text-3xl mb-3">{f.icon}</div>
+            <h3 className="text-xl font-semibold text-gray-100 mb-2">{f.title}</h3>
+            <p className="text-sm text-gray-400">{f.desc}</p>
           </div>
-        ) : (
-          <div className="flex flex-col md:flex-row h-full">
-            {/* Left Video A */}
-            <section className="md:w-28 flex-shrink-0 p-4">
-              <VideoCard video={state.videoA} label="A" isLoading={false} />
-            </section>
+        ))}
+      </section>
 
-            {/* Center Chat */}
-            <section className="md:w-44 flex-1 p-4 overflow-y-auto">
-              <ChatPanel sessionId={state.sessionId} />
-            </section>
-
-            {/* Right Video B */}
-            <section className="md:w-28 flex-shrink-0 p-4">
-              <VideoCard video={state.videoB} label="B" isLoading={false} />
-            </section>
-          </div>
-        )}
-      </main>
+      {/* Ingestion Form */}
+      <section className="px-4 max-w-2xl mx-auto">
+        <IngestionForm />
+      </section>
     </div>
   );
 }

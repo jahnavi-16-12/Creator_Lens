@@ -1,6 +1,9 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { SessionProvider } from './context/SessionContext';
+import { SidebarProvider } from './context/SidebarContext';
+import LayoutShell from './components/LayoutShell';
 
 const inter = Inter({
   variable: '--font-inter',
@@ -28,8 +31,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-gray-950 text-gray-100 antialiased">
-        {children}
+      <body
+        className="min-h-full antialiased"
+        style={{ background: '#0a0f1e', color: '#f9fafb' }}
+      >
+        <SessionProvider>
+          <SidebarProvider>
+            <LayoutShell>{children}</LayoutShell>
+          </SidebarProvider>
+        </SessionProvider>
       </body>
     </html>
   );

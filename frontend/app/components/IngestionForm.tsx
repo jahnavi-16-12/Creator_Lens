@@ -1,23 +1,14 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ingestVideos, type VideoMetadata } from '../../lib/api';
+import { useRouter } from 'next/navigation';
+import { useSession } from '../context/SessionContext';
 
-// ─── Props ─────────────────────────────────────────────────────────────────────
+export default function IngestionForm() {
+  // ── Session context ──
+  const { createNewSession } = useSession();
+  const router = useRouter();
 
-type IngestionFormProps = {
-  /**
-   * Called when ingestion succeeds.
-   * @param sessionId The generated session id.
-   * @param videoA    Metadata of the YouTube video.
-   * @param videoB    Metadata of the Instagram video.
-   */
-  onSuccess: (sessionId: string, videoA: VideoMetadata, videoB: VideoMetadata) => void;
-};
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-export default function IngestionForm({ onSuccess }: IngestionFormProps) {
   // ── Form state ──
   const [urlA, setUrlA] = useState(''); // YouTube URL
   const [urlB, setUrlB] = useState(''); // Instagram URL
@@ -61,19 +52,15 @@ export default function IngestionForm({ onSuccess }: IngestionFormProps) {
     await new Promise((r) => setTimeout(r, 300));
 
     try {
-      const response = await ingestVideos(urlA.trim(), urlB.trim());
-      // Backend returns null for a video that failed – treat that as an error
-      if (!response.video_a || !response.video_b) {
-        throw new Error('One or both videos could not be processed.');
-      }
+      await createNewSession(urlA.trim(), urlB.trim());
       setStep('done');
-      onSuccess(response.session_id, response.video_a, response.video_b);
+      router.push('/dashboard');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       setStep('error');
     }
-  }, [urlA, urlB, onSuccess]);
+  }, [urlA, urlB, createNewSession, router]);
 
   // ── UI helpers ──
   const isIdle = step === 'idle';
@@ -81,99 +68,98 @@ export default function IngestionForm({ onSuccess }: IngestionFormProps) {
 
   // Render ------------------------------------------------------------------
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 p-4">
-      <div className="w-full max-w-md space-y-6 rounded-xl bg-gray-800/80 backdrop-blur-md p-6 shadow-lg">
-        {/* Title */}
-        <h2 className="text-center text-2xl font-bold text-gray-100">Ingest Videos</h2>
-
-        {/* URL inputs */}
-        <div className="space-y-4">
-          {/* YouTube */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              YouTube URL
-            </label>
-            <input
-              type="url"
-              value={urlA}
-              onChange={(e) => setUrlA(e.target.value)}
-              className={`block w-full rounded-md border bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                step === 'error' && !YOUTUBE_REGEX.test(urlA) ? 'border-red-500 focus:border-red-500' : 'border-gray-700 focus:border-blue-500'
-              }`}
-              placeholder="https://www.youtube.com/watch?v=..."
-            />
-            {step === 'error' && !YOUTUBE_REGEX.test(urlA) && (
-              <p className="mt-1 text-xs text-red-400">Invalid YouTube URL.</p>
-            )}
-          </div>
-
-          {/* Instagram */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Instagram URL
-            </label>
-            <input
-              type="url"
-              value={urlB}
-              onChange={(e) => setUrlB(e.target.value)}
-              className={`block w-full rounded-md border bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                step === 'error' && !INSTAGRAM_REGEX.test(urlB) ? 'border-red-500 focus:border-red-500' : 'border-gray-700 focus:border-pink-500'
-              }`}
-              placeholder="https://www.instagram.com/reel/..."
-            />
-            {step === 'error' && !INSTAGRAM_REGEX.test(urlB) && (
-              <p className="mt-1 text-xs text-red-400">Invalid Instagram URL.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Submit button */}
-        <div className="flex justify-center pt-2">
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!isIdle || step === 'validating' || step === 'metadata' || step === 'transcripts' || step === 'embedding'}
-            className="inline-flex items-center gap-2 rounded-md bg-gradient-to-br from-blue-600 to-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {step === 'idle' ? 'Start Ingestion' : 'Processing…'}
-          </button>
-        </div>
-
-        {/* Error display */}
-        {error && (
-          <p className="mt-2 text-center text-sm text-red-400">{error}</p>
-        )}
-
-        {/* Progress steps */}
-        {showProgress && (
-          <div className="mt-4 space-y-2">
-            {/* Validating URLs */}
-            <StepItem
-              title="Validating URLs"
-              completed={step !== 'validating' && step !== 'error'}
-              active={step === 'validating'}
-            />
-            {/* Fetching metadata & transcripts */}
-            <StepItem
-              title="Fetching metadata & transcripts"
-              completed={step !== 'metadata' && step !== 'error'}
-              active={step === 'metadata'}
-            />
-            {/* Generating embeddings */}
-            <StepItem
-              title="Generating embeddings"
-              completed={step !== 'embedding' && step !== 'error'}
-              active={step === 'embedding'}
-            />
-            {/* Ready to chat */}
-            <StepItem
-              title="Ready to chat!"
-              completed={step === 'done'}
-              active={step === 'done'}
-            />
-          </div>
-        )}
+    <div className="w-full max-w-lg mx-auto bg-gray-900/60 backdrop-blur-md rounded-2xl border border-gray-800 p-6 md:p-8 shadow-xl transition-all duration-300 hover:shadow-2xl">
+      {/* Title */}
+      <div className="text-center mb-6">
+        <h2 className="text-xl font-bold text-gray-100 mb-1">Start Side-by-Side Analysis</h2>
+        <p className="text-xs text-gray-400">Enter a YouTube video and an Instagram reel to begin.</p>
       </div>
+
+      {/* URL inputs */}
+      <div className="space-y-5">
+        {/* YouTube */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+            YouTube Video URL
+          </label>
+          <input
+            type="url"
+            value={urlA}
+            onChange={(e) => setUrlA(e.target.value)}
+            disabled={!isIdle && step !== 'error'}
+            className={`block w-full rounded-xl border bg-gray-950/80 px-4 py-3 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all ${
+              step === 'error' && !YOUTUBE_REGEX.test(urlA) ? 'border-red-500 focus:border-red-500' : 'border-gray-800 focus:border-blue-500'
+            }`}
+            placeholder="https://www.youtube.com/watch?v=..."
+          />
+          {step === 'error' && !YOUTUBE_REGEX.test(urlA) && (
+            <p className="mt-1.5 text-xs text-red-400">Please enter a valid YouTube video or short URL.</p>
+          )}
+        </div>
+
+        {/* Instagram */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+            Instagram Reel URL
+          </label>
+          <input
+            type="url"
+            value={urlB}
+            onChange={(e) => setUrlB(e.target.value)}
+            disabled={!isIdle && step !== 'error'}
+            className={`block w-full rounded-xl border bg-gray-950/80 px-4 py-3 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all ${
+              step === 'error' && !INSTAGRAM_REGEX.test(urlB) ? 'border-red-500 focus:border-red-500' : 'border-gray-800 focus:border-pink-500'
+            }`}
+            placeholder="https://www.instagram.com/reel/..."
+          />
+          {step === 'error' && !INSTAGRAM_REGEX.test(urlB) && (
+            <p className="mt-1.5 text-xs text-red-400">Please enter a valid Instagram reel or post URL.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Submit button */}
+      <div className="flex justify-center pt-5">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={step === 'validating' || step === 'metadata' || step === 'transcripts' || step === 'embedding'}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 px-5 py-3 text-sm font-semibold text-white transition-all shadow-md hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {step === 'idle' ? 'Start Analysis' : 'Ingesting Videos…'}
+        </button>
+      </div>
+
+      {/* Error display */}
+      {error && (
+        <p className="mt-4 text-center text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl py-2 px-3">{error}</p>
+      )}
+
+      {/* Progress steps */}
+      {showProgress && (
+        <div className="mt-6 space-y-3 bg-gray-950/50 rounded-xl p-4 border border-gray-850">
+          <StepItem
+            title="Validating URLs"
+            completed={step !== 'validating'}
+            active={step === 'validating'}
+          />
+          <StepItem
+            title="Fetching metadata & transcripts"
+            completed={step !== 'validating' && step !== 'metadata' && step !== 'transcripts'}
+            active={step === 'metadata' || step === 'transcripts'}
+          />
+          <StepItem
+            title="Generating embeddings"
+            completed={step === 'done'}
+            active={step === 'embedding'}
+          />
+          <StepItem
+            title="Ready to compare!"
+            completed={step === 'done'}
+            active={step === 'done'}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -189,17 +175,25 @@ type StepItemProps = {
 function StepItem({ title, completed, active }: StepItemProps) {
   return (
     <div
-      className={`flex items-center space-x-2 transition-opacity duration-300 ${
-        completed ? 'opacity-100' : 'opacity-70'
+      className={`flex items-center space-x-2.5 transition-all duration-300 ${
+        completed ? 'opacity-100' : 'opacity-65'
       }`}
     >
       {completed ? (
-        <span className="text-green-400">✓</span>
+        <div className="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold">
+          ✓
+        </div>
+      ) : active ? (
+        <div className="w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-xs animate-spin">
+          🔄
+        </div>
       ) : (
-        <span className="animate-pulse text-gray-400">⏳</span>
+        <div className="w-5 h-5 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-500 text-[10px]">
+          ●
+        </div>
       )}
       <span
-        className={`text-sm ${active ? 'font-semibold text-gray-100' : 'text-gray-300'}`}
+        className={`text-xs font-medium ${active ? 'text-gray-100 font-semibold' : 'text-gray-400'}`}
       >
         {title}
       </span>

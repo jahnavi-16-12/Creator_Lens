@@ -1,48 +1,49 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { useEffect } from 'react';
+import { useSession } from '../../context/SessionContext';
 import ChatPanel from '../../components/ChatPanel';
+import VideoCard from '../../components/VideoCard';
 
 export default function ChatPage() {
   const params = useParams();
-  const router = useRouter();
   const sessionId = params.sessionId as string;
+  const { videoA, videoB, loadSession, isLoading } = useSession();
+
+  // Load session metadata on mount / sessionId change
+  useEffect(() => {
+    if (sessionId) {
+      loadSession(sessionId).catch((err) => {
+        console.error('Failed to load session details:', err);
+      });
+    }
+  }, [sessionId]);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-950">
-      {/* ── Top bar ── */}
-      <div className="flex-shrink-0 border-b border-gray-800 bg-gray-950/80 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center gap-3">
-          <button
-            onClick={() => router.push('/')}
-            className="flex items-center gap-1.5 text-gray-400 hover:text-gray-100 transition-colors text-sm"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-            Back
-          </button>
-
-          <div className="flex items-center gap-2 ml-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-              <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            </div>
-            <span className="text-sm font-bold text-gray-100">Creator Lens Chat</span>
+    <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden" style={{ background: '#0a0f1e' }}>
+      {/* Left Column: Side-by-side comparison Video Cards */}
+      <div className="w-full lg:w-[420px] shrink-0 border-b lg:border-b-0 lg:border-r border-[#1e293b] flex flex-col gap-4 p-5 overflow-y-auto bg-[#0d1324] h-[45vh] lg:h-full">
+        <div className="flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Video Intelligence</h2>
+            <p className="text-[10px] text-gray-500">Side-by-side performance</p>
           </div>
+          <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-medium">
+            Active Session
+          </span>
+        </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-[10px] font-mono text-gray-600 hidden sm:block truncate max-w-[200px]">
-              session: {sessionId}
-            </span>
-          </div>
+        <div className="flex flex-col gap-4 flex-1">
+          <VideoCard video={videoA} label="A" isLoading={isLoading} />
+          <VideoCard video={videoB} label="B" isLoading={isLoading} />
         </div>
       </div>
 
-      {/* ── Chat panel fills the rest ── */}
-      <ChatPanel sessionId={sessionId} />
+      {/* Right Column: Interactive AI Chat Panel */}
+      <div className="flex-1 min-w-0 h-[55vh] lg:h-full overflow-hidden">
+        <ChatPanel sessionId={sessionId} />
+      </div>
     </div>
   );
 }

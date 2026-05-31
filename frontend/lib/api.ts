@@ -87,12 +87,15 @@ export function streamChat(
   
   fetch(`${BASE_URL}/api/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
     body: JSON.stringify({ query, session_id: sessionId, thread_id: threadId }),
     signal: controller.signal,
   }).then(async (response) => {
     if (!response.ok || !response.body) {
-      throw new Error(`Stream failed: ${response.statusText}`);
+      const err = await response.text().catch(() => '');
+      console.error('SSE request failed', response.status, err);
+      onError(`SSE request failed ${response.status}`);
+      return;
     }
     
     const reader = response.body.getReader();
@@ -107,29 +110,43 @@ export function streamChat(
       const lines = buffer.split('\n\n');
       buffer = lines.pop() || ''; // Keep the last incomplete part in the buffer
 
-      for (const chunk of lines) {
-        if (!chunk.trim()) continue;
-        
-        // chunk format: "event: type\ndata: json_string"
-        const eventMatch = chunk.match(/event: (.*)\n/);
-        const dataMatch = chunk.match(/data: (.*)/);
-        
-        if (eventMatch && dataMatch) {
-          const eventType = eventMatch[1].trim();
-          try {
-            const data = JSON.parse(dataMatch[1]);
-            
-            if (eventType === 'token' && data.text) {
-              onToken(data.text);
-            } else if (eventType === 'citations' && data.citations) {
-              onCitations(data.citations);
-            } else if (eventType === 'done' && data.thread_id) {
-              onDone(data.thread_id);
-            } else if (eventType === 'error') {
-              onError(data.message || 'Unknown error');
+      // Simple SSE line parser
+      let eventType = '';
+      let dataBuffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Split by newline to process each line
+        const lines = buffer.split('\n');
+        // Keep last incomplete line in buffer
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            dataBuffer = line.slice(5).trim();
+          } else if (line.trim() === '') {
+            // End of event block
+            if (eventType && dataBuffer) {
+              try {
+                const data = JSON.parse(dataBuffer);
+                if (eventType === 'token' && data.text) {
+                  onToken(data.text);
+                } else if (eventType === 'citations' && data.citations) {
+                  onCitations(data.citations);
+                } else if (eventType === 'done' && data.thread_id) {
+                  onDone(data.thread_id);
+                } else if (eventType === 'error') {
+                  onError(data.message || 'Unknown error');
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE JSON:', e);
+              }
             }
-          } catch (e) {
-            console.error('Failed to parse SSE JSON:', e);
+            // Reset for next event
+            eventType = '';
+            dataBuffer = '';
           }
         }
       }
