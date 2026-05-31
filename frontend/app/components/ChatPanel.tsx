@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Bookmark, Send, Loader2, CheckCircle } from 'lucide-react';
-import { streamChat, getChatHistory, Citation, Message as ApiMessage } from '../../lib/api';
+import { streamChat, getChatHistory, Citation, Message as ApiMessage, SavedChat } from '../../lib/api';
+import { useSearchParams } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
 
 // ─── Local Types ────────────────────────────────────────────────────────────
 
@@ -12,15 +14,6 @@ interface Message extends ApiMessage {
 
 interface ChatPanelProps {
   sessionId: string;
-}
-
-interface SavedChat {
-  thread_id: string;
-  session_id: string;
-  saved_at: string;
-  title: string;       // first user message, truncated to 60 chars
-  preview: string;     // first 100 chars of first AI response
-  message_count: number;
 }
 
 // ─── Suggested Questions ──────────────────────────────────────────────────────
@@ -35,6 +28,10 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatPanel({ sessionId }: ChatPanelProps) {
+  const searchParams = useSearchParams();
+  const restore = searchParams.get('restore');
+  const threadFromUrl = searchParams.get('thread');
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -46,32 +43,57 @@ export default function ChatPanel({ sessionId }: ChatPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamCleanupRef = useRef<(() => void) | null>(null);
 
-  // ─── Load Session Data ───
+  // ─── Load Session Data / Restore Saved Chat ───
   useEffect(() => {
-    // Check thread ID
-    const storedThreadId = localStorage.getItem(`cl_thread_${sessionId}`);
-    if (storedThreadId) {
-      setThreadId(storedThreadId);
-      getChatHistory(storedThreadId)
+    if (restore === 'true' && threadFromUrl) {
+      // 1. First try: load from saved chats in localStorage
+      try {
+        const saved = JSON.parse(localStorage.getItem('cl_saved_chats') || '[]');
+        const match = saved.find((c: SavedChat) => c.thread_id === threadFromUrl);
+        if (match?.messages && match.messages.length > 0) {
+          setMessages(match.messages);
+          setThreadId(threadFromUrl);
+          return;
+        }
+      } catch (e) {
+        console.error('Failed to load saved chat from localStorage:', e);
+      }
+
+      // 2. Fallback: fetch from API
+      getChatHistory(threadFromUrl)
         .then((history) => {
           setMessages(history);
+          setThreadId(threadFromUrl);
         })
         .catch((err) => {
-          console.error('Failed to load chat history:', err);
+          console.error('Failed to load chat history from API:', err);
         });
     } else {
-      setMessages([]);
-      setThreadId(null);
+      // Normal load — check localStorage for existing thread
+      const storedThreadId = localStorage.getItem(`cl_thread_${sessionId}`);
+      if (storedThreadId) {
+        setThreadId(storedThreadId);
+        getChatHistory(storedThreadId)
+          .then((history) => {
+            setMessages(history);
+          })
+          .catch((err) => {
+            console.error('Failed to load chat history:', err);
+          });
+      } else {
+        setMessages([]);
+        setThreadId(null);
+      }
     }
 
-    // Cleanup active streams on unmount or session change
+    // Cleanup active streams on unmount or session/restore change
     return () => {
       if (streamCleanupRef.current) {
         streamCleanupRef.current();
         streamCleanupRef.current = null;
       }
     };
-  }, [sessionId]);
+  }, [sessionId, restore, threadFromUrl]);
 
   // ─── Sync Bookmark State when Thread ID Changes ───
   useEffect(() => {
@@ -124,19 +146,14 @@ export default function ChatPanel({ sessionId }: ChatPanelProps) {
       setIsBookmarked(false);
     } else {
       // Save it
-      const firstUserMsg = messages.find(m => m.role === 'user')?.content || 'Conversation Analysis';
-      const title = firstUserMsg.length > 60 ? firstUserMsg.slice(0, 57) + '...' : firstUserMsg;
-
-      const firstAiMsg = messages.find(m => m.role === 'assistant')?.content || '';
-      const preview = firstAiMsg.length > 100 ? firstAiMsg.slice(0, 97) + '...' : firstAiMsg;
-
       const newSaved: SavedChat = {
         thread_id: threadId,
         session_id: sessionId,
         saved_at: new Date().toISOString(),
-        title,
-        preview,
+        title: messages.find(m => m.role === 'user')?.content?.slice(0, 60) ?? 'Untitled chat',
+        preview: messages.find(m => m.role === 'assistant')?.content?.slice(0, 100) ?? '',
         message_count: messages.length,
+        messages: messages,
       };
 
       updatedChats = [newSaved, ...savedChats];
@@ -171,6 +188,10 @@ export default function ChatPanel({ sessionId }: ChatPanelProps) {
       isStreaming: true,
     };
 
+    // Compute synchronously from the current messages closure so it's always
+    // defined by the time onCitations fires (setState updaters run async).
+    // messages.length = N → userMsg lands at N, aiMsg lands at N + 1.
+    const currentMsgIndex = messages.length + 1;
     setMessages((prev) => [...prev, userMsg, aiMsg]);
     setInput('');
     setIsStreaming(true);
@@ -213,11 +234,13 @@ export default function ChatPanel({ sessionId }: ChatPanelProps) {
         setMessages((prev) => {
           if (prev.length === 0) return prev;
           const next = [...prev];
-          const lastIdx = next.length - 1;
-          next[lastIdx] = {
-            ...next[lastIdx],
-            citations: accumulatedCitations,
-          };
+          const idx = currentMsgIndex ?? next.length - 1;
+          if (next[idx]) {
+            next[idx] = {
+              ...next[idx],
+              citations: accumulatedCitations,
+            };
+          }
           return next;
         });
       },
@@ -352,26 +375,67 @@ export default function ChatPanel({ sessionId }: ChatPanelProps) {
                       AI
                     </div>
                     {/* Bubble */}
-                    <div className="bg-[#1f2937] text-gray-100 text-sm px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-[85%] break-words whitespace-pre-wrap">
-                      {msg.content || (msg.isStreaming && '\u00A0')}
-                      {msg.isStreaming && (
-                        <span className="inline-block w-0.5 h-4 bg-blue-400 animate-pulse ml-0.5 align-middle" />
-                      )}
+                    <div className="bg-[#1f2937] text-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-[85%] break-words">
+                      <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
+                        {msg.content ? (
+                          <ReactMarkdown
+                            components={{
+                              p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                              strong: ({ children }) => <strong style={{ color: '#f9fafb', fontWeight: 600 }}>{children}</strong>,
+                              ul: ({ children }) => <ul style={{ paddingLeft: '16px', margin: '4px 0' }}>{children}</ul>,
+                              li: ({ children }) => <li style={{ marginBottom: '2px', color: '#d1d5db' }}>{children}</li>,
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        ) : (
+                          msg.isStreaming && '\u00A0'
+                        )}
+                        {msg.isStreaming && (
+                          <span className="inline-block w-0.5 h-4 bg-blue-400 animate-pulse ml-0.5 align-middle" />
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Citations below AI bubble */}
+                  {/* Citations below AI bubble — expandable block */}
                   {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1 ml-8">
-                      {msg.citations.map((citation, citIdx) => (
-                        <div
-                          key={citIdx}
-                          className="text-[10px] bg-[#0a0f1e] border border-[#1e293b] text-gray-500 px-2 py-0.5 rounded-full hover:border-blue-500 cursor-default"
-                          title={citation.snippet}
-                        >
-                          Video {citation.video_label} · Chunk {citation.chunk_index}
-                        </div>
-                      ))}
+                    <div style={{ marginTop: '8px', marginLeft: '32px' }}>
+                      <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px', fontWeight: 600, letterSpacing: '0.05em' }}>
+                        SOURCES
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {msg.citations.map((c, i) => (
+                          <div key={i} style={{
+                            backgroundColor: '#0d1424',
+                            border: '1px solid #1e293b',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: c.snippet ? '4px' : '0' }}>
+                              <span style={{
+                                backgroundColor: c.video_label === 'A' ? '#1e3a5f' : '#2d1b4e',
+                                color: c.video_label === 'A' ? '#60a5fa' : '#c084fc',
+                                padding: '1px 8px',
+                                borderRadius: '999px',
+                                fontSize: '10px',
+                                fontWeight: 700
+                              }}>
+                                Video {c.video_label}
+                              </span>
+                              <span style={{ color: '#4b5563', fontSize: '10px' }}>
+                                {c.chunk_index === 'metadata' ? 'Metadata' : `Chunk ${c.chunk_index}`}
+                              </span>
+                            </div>
+                            {c.snippet && (
+                              <div style={{ color: '#9ca3af', fontSize: '11px', lineHeight: '1.5', marginTop: '4px', fontStyle: 'italic' }}>
+                                &quot;{c.snippet}&quot;
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

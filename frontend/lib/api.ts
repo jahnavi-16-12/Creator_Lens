@@ -32,7 +32,7 @@ export interface IngestResponse {
 
 export interface Citation {
   video_label: string;
-  chunk_index: number;
+  chunk_index: number | string;
   snippet: string;
 }
 
@@ -46,6 +46,16 @@ export interface Message {
 export interface ChatResponse {
   response: string;
   citations: Citation[];
+}
+
+export interface SavedChat {
+  thread_id: string;
+  session_id: string;
+  saved_at: string;
+  title: string;
+  preview: string;
+  message_count: number;
+  messages?: Message[];
 }
 
 // Ingest videos

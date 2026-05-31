@@ -4,14 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bookmark, MessageSquare, Trash2, ExternalLink } from 'lucide-react';
 
-interface SavedChat {
-  thread_id: string;
-  session_id: string;
-  saved_at: string;
-  title: string;       // first user message, truncated to 60 chars
-  preview: string;     // first 100 chars of first AI response
-  message_count: number;
-}
+import { SavedChat } from '../../lib/api';
 
 function formatDate(dateStr: string) {
   try {
@@ -56,7 +49,7 @@ export default function SavedChatsPage() {
   const handleOpen = (chat: SavedChat) => {
     // Save to cl_thread_{sessionId} so the analysis page can pick up the correct thread history
     localStorage.setItem(`cl_thread_${chat.session_id}`, chat.thread_id);
-    router.push(`/analysis/${chat.session_id}`);
+    router.push(`/analysis/${chat.session_id}?thread=${chat.thread_id}&restore=true`);
   };
 
   if (!hasLoaded) {
