@@ -1,7 +1,10 @@
 import re
 import json
+import logging
 import asyncio
 from typing import TypedDict, Optional, Annotated, AsyncGenerator
+
+logger = logging.getLogger(__name__)
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
@@ -34,7 +37,12 @@ async def classify_query(state: RAGState) -> dict:
     Classifies the user query into a type and determines if a complex model is needed.
     """
     # Use cheapest model for classification
-    model = ChatGoogleGenerativeAI(model=settings.LLM_LITE_MODEL, temperature=0, google_api_key=settings.GEMINI_API_KEY)
+    model = ChatGoogleGenerativeAI(
+        model=settings.LLM_LITE_MODEL, 
+        temperature=0, 
+        google_api_key=settings.GEMINI_API_KEY,
+        max_retries=2
+    )
     
     prompt = f"""Classify the query into one type. 
 Types: 'comparison', 'metadata', 'suggestion', 'engagement', 'general'.
@@ -107,10 +115,18 @@ async def generate_response(state: RAGState) -> dict:
     Generates the final response using the appropriate model based on query complexity.
     """
     model_name = settings.LLM_MODEL if state.get('use_complex_model') else settings.LLM_LITE_MODEL
-    model = ChatGoogleGenerativeAI(model=model_name, streaming=True, temperature=0.2, google_api_key=settings.GEMINI_API_KEY)
+    model = ChatGoogleGenerativeAI(
+        model=model_name, 
+        streaming=True, 
+        temperature=0.2, 
+        google_api_key=settings.GEMINI_API_KEY,
+        max_retries=2
+    )
     
     system_prompt = """You are a video analytics expert helping creators improve performance.
-Always cite sources as [Video A - Chunk N] or [Video B - Chunk N].
+Always cite your sources using bracketed references:
+- Use [Video A - Chunk N] or [Video B - Chunk N] when referring to specific transcript chunks/content.
+- Use [Video A - Metadata] or [Video B - Metadata] when referring to video stats, creators, or general video metadata.
 Base answers only on the provided context and metadata. 
 
 IMPORTANT RULES FOR METADATA:
@@ -151,35 +167,90 @@ IMPORTANT RULES FOR METADATA:
 
 async def extract_citations(state: RAGState) -> dict:
     """
-    Extracts citations from the response and maps them to snippets from retrieved_chunks.
+    Extracts citations from the response and maps them to source snippets.
+
+    The AI often combines references inside a single bracket group, e.g.:
+      [Video A - Metadata, Video B - Metadata]
+      [Video A - Chunk 0, Video B - Chunk 1]
+      [Video A, Video B]
+
+    Strategy:
+      1. Find every [...] bracket group in the response.
+      2. Inside each group, search for:
+         - Chunk references (e.g., 'Video A - Chunk 0')
+         - Explicit metadata references (e.g., 'Video A - Metadata')
+         - Simple video references (e.g., 'Video A'), falling back to metadata references.
+      3. Deduplicate with a seen-set so each source appears once.
     """
     response_text = state.get('response', '')
-    citations = []
-    
-    # Find patterns like [Video A - Chunk 3] or [Video B - Chunk 1]
-    pattern = r"\[Video\s+([A-B])\s*-\s*Chunk\s+(\d+)\]"
-    matches = re.findall(pattern, response_text, re.IGNORECASE)
-    
-    seen = set()
-    for label, chunk_idx in matches:
-        key = f"{label.upper()}-{chunk_idx}"
-        if key in seen:
-            continue
-        seen.add(key)
-        
-        # Match with actual retrieved chunks
-        for chunk in state.get('retrieved_chunks', []):
-            chunk_label = str(chunk.get('video_label', '')).upper()
-            chunk_i = str(chunk.get('chunk_index', ''))
-            if chunk_label == label.upper() and chunk_i == str(chunk_idx):
-                citations.append({
-                    'video_label': chunk.get('video_label'),
-                    'chunk_index': chunk.get('chunk_index'),
-                    'snippet': chunk.get('text', '')[:100]
-                })
-                break
-                
+    citations: list[dict] = []
+    seen: set[str] = set()
+
+    # Compiled inner-group scanners
+    chunk_ref  = re.compile(r'Video\s+([A-B])\s*-\s*Chunk\s+(\d+)', re.IGNORECASE)
+    meta_ref   = re.compile(r'Video\s+([A-B])\s*-\s*Metadata',       re.IGNORECASE)
+    simple_ref = re.compile(r'Video\s+([A-B])',                      re.IGNORECASE)
+
+    # Pull every [...] block (greedy-safe: [^\]] stops at the first ])
+    for bracket_content in re.findall(r'\[([^\]]+)\]', response_text):
+
+        # ── Chunk references ────────────────────────────────────────────────
+        for label, chunk_idx in chunk_ref.findall(bracket_content):
+            key = f"{label.upper()}-chunk-{chunk_idx}"
+            if key in seen:
+                continue
+            seen.add(key)
+            for chunk in state.get('retrieved_chunks', []):
+                if (str(chunk.get('video_label', '')).upper() == label.upper()
+                        and str(chunk.get('chunk_index', '')) == str(chunk_idx)):
+                    citations.append({
+                        'video_label': chunk.get('video_label'),
+                        'chunk_index': chunk.get('chunk_index'),
+                        'snippet': chunk.get('text', '')[:100],
+                    })
+                    break
+
+        # ── Explicit Metadata references ────────────────────────────────────
+        for label in meta_ref.findall(bracket_content):
+            key = f"{label.upper()}-metadata"
+            if key in seen:
+                continue
+            seen.add(key)
+            meta    = state.get('video_metadata', {}).get(label.upper(), {})
+            title   = meta.get('title')   or ''
+            creator = meta.get('creator') or ''
+            snippet = (f"Title: {title} | Creator: {creator}"
+                       if (title or creator) else "Video metadata")
+            citations.append({
+                'video_label': label.upper(),
+                'chunk_index': 'metadata',
+                'snippet': snippet,
+            })
+
+        # ── Simple Video references (fallback to Metadata) ──────────────────
+        # Strip already matched references to avoid matching "Video A" inside "Video A - Chunk 0"
+        remaining_content = chunk_ref.sub('', bracket_content)
+        remaining_content = meta_ref.sub('', remaining_content)
+
+        for label in simple_ref.findall(remaining_content):
+            key = f"{label.upper()}-metadata"
+            if key in seen:
+                continue
+            seen.add(key)
+            meta    = state.get('video_metadata', {}).get(label.upper(), {})
+            title   = meta.get('title')   or ''
+            creator = meta.get('creator') or ''
+            snippet = (f"Title: {title} | Creator: {creator}"
+                       if (title or creator) else "Video metadata")
+            citations.append({
+                'video_label': label.upper(),
+                'chunk_index': 'metadata',
+                'snippet': snippet,
+            })
+
     return {"citations": citations}
+
+
 
 
 # ---------------------------------------------------------
@@ -208,6 +279,12 @@ app = graph.compile(checkpointer=MemorySaver())
 async def stream_rag_response(query: str, session_id: str, thread_id: str) -> AsyncGenerator:
     """
     Executes the LangGraph RAG pipeline and yields streaming events to the client.
+
+    Citations strategy:
+      - Fast path: capture the 'cite' node output from on_chain_end events.
+      - Guaranteed fallback: after all events, read the final state from the
+        MemorySaver checkpoint. This handles all LangGraph versions where the
+        on_chain_end event name may be prefixed or absent.
     """
     config = {'configurable': {'thread_id': thread_id}}
     initial_state = {
@@ -216,17 +293,32 @@ async def stream_rag_response(query: str, session_id: str, thread_id: str) -> As
         'thread_id': thread_id,
         'messages': [HumanMessage(content=query)]
     }
-    
+
+    citations_emitted = False
+
     async for event in app.astream_events(initial_state, config=config, version='v2'):
         if event['event'] == 'on_chat_model_stream' and 'final_answer' in event.get('tags', []):
             if 'chunk' in event['data'] and hasattr(event['data']['chunk'], 'content'):
                 content = event['data']['chunk'].content
                 if content:
                     yield {'type': 'token', 'data': content}
-        
-        elif event['event'] == 'on_chain_end' and event['name'] == 'cite':
+
+        elif event['event'] == 'on_chain_end' and event['name'] in ('cite', 'LangGraph:cite'):
             output = event['data'].get('output', {})
             if 'citations' in output:
                 yield {'type': 'citations', 'data': output['citations']}
-                
+                citations_emitted = True
+
+    # Guaranteed fallback — read from the checkpointer so citations always arrive
+    # regardless of LangGraph version or event naming quirks.
+    if not citations_emitted:
+        try:
+            final_state = await app.aget_state(config)
+            if final_state and final_state.values:
+                cits = final_state.values.get('citations', [])
+                yield {'type': 'citations', 'data': cits}
+        except Exception as e:
+            logger.warning(f"Could not read citations from final state: {e}")
+
     yield {'type': 'done', 'data': {'thread_id': thread_id}}
+
